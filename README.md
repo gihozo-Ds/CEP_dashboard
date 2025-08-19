@@ -22,29 +22,18 @@ pip install -r requirements.txt
 ```
 
 ## Usage
-
-1. Place your data file as `final_dataset.csv` in the project directory.
-2. Run the app:
+1. Run the app:
     ```bash
     python app.py
     ```
-3. Open your browser at [http://127.0.0.1:8050](http://127.0.0.1:8050)
+2. Open your browser at [http://127.0.0.1:8050](http://127.0.0.1:8050)
 
 ## File Structure
 
 - `app.py` - Main dashboard application
-- `final_dataset.csv` - Data source (must be present)
+- `final_dataset.csv` - Dummy dataset
 - `README.md` - Project documentation
 
-## Customization
-
-- Update `final_dataset.csv` with your latest data.
-- Extend the dashboard by adding new pages or visualizations in `app.py`.
-
-
 ## Author
 
-Gihozo Christian.
-## Author
-
-Gihozo Christian.
+Gihozo Christian
