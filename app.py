@@ -4,6 +4,12 @@ import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
 import numpy as np
+import geopandas as gpd
+import json
+from textblob import TextBlob
+from wordcloud import WordCloud
+import base64
+from io import BytesIO
 
 # ---------------- Load & prep data ----------------
 DATA_PATH = "C:/Users/gihoz/OneDrive/Desktop/CEPdash/final_dataset.csv"
@@ -26,6 +32,20 @@ if 'feedback_rating' not in df.columns:
     df['feedback_rating'] = np.nan
 else:
     df['feedback_rating'] = pd.to_numeric(df['feedback_rating'], errors='coerce')
+
+# ---- sentiment preprocessing ----
+def classify_sentiment(text):
+    if not isinstance(text, str) or text.strip() == "":
+        return "neutral"
+    polarity = TextBlob(text).sentiment.polarity
+    if polarity > 0.1:
+        return "positive"
+    elif polarity < -0.1:
+        return "negative"
+    else:
+        return "neutral"
+
+df['sentiment'] = df['feedback_comment'].apply(classify_sentiment) if 'feedback_comment' in df.columns else "neutral"
 
 # ---------------- Dash app ----------------
 app = dash.Dash(__name__)
@@ -50,6 +70,69 @@ def make_card(title: str, value, color: str):
         'alignItems': 'center',
         'boxSizing': 'border-box'
     })
+# ---- Sentiment visual creators ----
+def create_sentiment_by_level(filtered_df):
+    if filtered_df.empty or 'sentiment' not in filtered_df.columns:
+        return go.Figure()
+
+    sentiment_counts = (
+        filtered_df.groupby(['assigned_level', 'sentiment'])
+        .size()
+        .reset_index(name='count')
+    )
+
+    fig = px.bar(
+        sentiment_counts,
+        x="assigned_level",
+        y="count",
+        color="sentiment",
+        barmode="stack",
+        title="Sentiment Distribution by Assigned Level"
+    )
+    fig.update_layout(
+        xaxis_title="Assigned Level",
+        yaxis_title="Count",
+        title_x=0.5,
+        height=400
+    )
+    return fig
+
+def create_avg_rating_by_department(filtered_df):
+    rated_df = filtered_df.dropna(subset=['feedback_rating'])
+    if rated_df.empty:
+        return go.Figure()
+
+    dept_avg = rated_df.groupby("assigned_department")['feedback_rating'].mean().reset_index()
+
+    fig = px.bar(
+        dept_avg,
+        x="assigned_department",
+        y="feedback_rating",
+        title="Average Feedback Rating by Department",
+        text="feedback_rating"
+    )
+    fig.update_traces(texttemplate='%{text:.2f}', textposition="outside", marker_color="#3498db")
+    fig.update_layout(
+        xaxis_title="Department",
+        yaxis_title="Average Rating",
+        title_x=0.5,
+        height=400
+    )
+    return fig
+
+def create_wordcloud(filtered_df):
+    if 'feedback_comment' not in filtered_df.columns or filtered_df['feedback_comment'].dropna().empty:
+        return html.P("No feedback available for word cloud.")
+
+    text = " ".join(str(comment) for comment in filtered_df['feedback_comment'].dropna())
+    wc = WordCloud(width=800, height=400, background_color="white").generate(text)
+
+    img = BytesIO()
+    wc.to_image().save(img, format="PNG")
+    img.seek(0)
+    encoded = base64.b64encode(img.read()).decode("utf-8")
+
+    return html.Img(src=f"data:image/png;base64,{encoded}", style={'width': '100%', 'height': 'auto'})
 
 # ---- Chart creators ----
 def create_dept_bar(filtered_df):
@@ -202,6 +285,40 @@ def create_issues_over_time(filtered_df):
     )
     return fig
 
+def create_district_map(filtered_df):
+    issue_counts = filtered_df.groupby('district').size().reset_index(name='issue_count')
+
+    with open("C:/Users/gihoz/OneDrive/Desktop/CEPdash/geoBoundaries-RWA-ADM2 (1).geojson", "r", encoding="utf-8") as f:
+        rwanda_geojson = json.load(f)
+
+    gdf = gpd.GeoDataFrame.from_features(rwanda_geojson["features"])
+    merged = gdf.merge(issue_counts, left_on='shapeName', right_on='district', how='left')
+    merged['issue_count'] = merged['issue_count'].fillna(0)
+
+    green_palette = ["#e8f8ec", "#7bed9f", "#2ecc71", "#27ae60", "#145214"]
+
+    fig = px.choropleth_map(
+        merged,
+        geojson=rwanda_geojson,
+        locations="shapeName",
+        featureidkey="properties.shapeName",
+        color="issue_count",
+        color_continuous_scale=green_palette,
+        center={"lat": -1.9441, "lon": 30.0619},
+        zoom=7.1,
+        labels={"issue_count": "Issue Count"},
+        hover_data={"shapeName": True, "issue_count": True}
+    )
+
+    fig.update_layout(
+        mapbox_style="carto-positron",
+        title="Density of Reported Issues by District in Kigali, Rwanda",
+        title_x=0.5,
+        title_font=dict(size=20, family="Lato, sans-serif", color="#144d14"),
+        margin={"r": 0, "t": 50, "l": 0, "b": 0},
+        coloraxis_colorbar_title="Issue Count"
+    )
+    return fig
 
 # ---- Dashboard view ----
 def dashboard_view(filtered_df: pd.DataFrame):
@@ -286,6 +403,16 @@ app.layout = html.Div([
 ])
 
 # ---------------- Callbacks ----------------
+# --- lightweight cache (in-memory) for heavy figures ---
+_MAP_CACHE = {}
+
+def _map_cache_key(filtered_df, time_filter, selected_district, selected_sector, selected_cell):
+    # summarize to a small, hashable signature (district counts)
+    counts = filtered_df.groupby('district').size()
+    sig = tuple(sorted((str(k), int(v)) for k, v in counts.items()))
+    # include filters so keys differ when user changes them
+    return ('map_v1', time_filter, selected_district or '', selected_sector or '', selected_cell or '', sig)
+
 @app.callback(
     Output('sector-dropdown', 'options'),
     Input('district-dropdown', 'value')
@@ -335,9 +462,11 @@ def update_current_page(insights_n, sentiments_n, model_n, back_n):
      Input('district-dropdown', 'value'),
      Input('sector-dropdown', 'value'),
      Input('cell-dropdown', 'value'),
-     Input('time-filter', 'value')]
+     Input('time-filter', 'value')],
+    prevent_initial_call=True  # initial content is already in the layout
 )
 def render_page(current_page, selected_district, selected_sector, selected_cell, time_filter):
+    # --- fast filter ---
     filtered_df = df.copy()
 
     if df['date_reported'].notna().any():
@@ -354,10 +483,29 @@ def render_page(current_page, selected_district, selected_sector, selected_cell,
     if selected_cell:
         filtered_df = filtered_df[filtered_df['cell'] == selected_cell]
 
+    if current_page == 'sentiments':
+        sentiments_layout = html.Div([
+            dcc.Graph(figure=create_sentiment_by_level(filtered_df)),
+            dcc.Graph(figure=create_avg_rating_by_department(filtered_df)),
+            html.H3("Word Cloud of Citizens' Feedback", style={'marginTop': '20px'}),
+            create_wordcloud(filtered_df)
+        ])
+        return sentiments_layout, {'display': 'inline-block', 'marginBottom': '20px'}
+    # --- pages ---
     if current_page == 'insights':
+        # Light charts (recompute)
         left_fig = create_level_bar(filtered_df)
         right_fig = create_resolution_donut(filtered_df)
         bottom_fig = create_issues_over_time(filtered_df)
+
+        # Heavy map: use cache
+        key = _map_cache_key(filtered_df, time_filter, selected_district, selected_sector, selected_cell)
+        map_fig = _MAP_CACHE.get(key)
+        if map_fig is None:
+            map_fig = create_district_map(filtered_df)
+            # preserve user zoom/pan and avoid re-draws unless data signature changes
+            map_fig.update_layout(uirevision='insights-map')
+            _MAP_CACHE[key] = map_fig
 
         insights_layout = html.Div([
             html.Div([
@@ -368,6 +516,14 @@ def render_page(current_page, selected_district, selected_sector, selected_cell,
                     dcc.Graph(figure=right_fig, config={'displayModeBar': False})
                 ], style={'width': '48%', 'boxSizing': 'border-box', 'display': 'inline-block', 'paddingLeft': '12px', 'verticalAlign': 'top'})
             ], style={'display': 'flex', 'flexDirection': 'row', 'justifyContent': 'space-between', 'flexWrap': 'nowrap', 'alignItems': 'flex-start'}),
+
+            html.Div([
+                # keep interactivity but make it lighter; uirevision avoids redraw
+                dcc.Graph(
+                    figure=map_fig,
+                    config={'displayModeBar': True, 'scrollZoom': False, 'doubleClick': 'reset', 'modeBarButtonsToRemove': ['lasso2d', 'select2d']}
+                )
+            ], style={'marginTop': '20px'}),
 
             html.Div([
                 dcc.Graph(figure=bottom_fig, config={'displayModeBar': True})
@@ -390,6 +546,7 @@ def render_page(current_page, selected_district, selected_sector, selected_cell,
         ])
         return model_layout, {'display': 'inline-block', 'marginBottom': '20px'}
 
+    # dashboard
     return dashboard_view(filtered_df), {'display': 'none'}
 
 if __name__ == '__main__':
