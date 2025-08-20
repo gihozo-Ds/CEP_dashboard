@@ -4,12 +4,12 @@ A Dash-powered dashboard for visualizing and analyzing citizen-reported issues, 
 
 ## Features
 
-- Overview of reported issues by department and administrative level
-- Time-based filtering (All, Today, Last 7 Days)
-- Location-based filtering (District, Sector, Cell)
-- Insights: resolution times, trends, and heatmap showing the issue density by district
-- Sentiment analysis: sentiment by assigned level, average rating by department
-- Predictive model 
+- Overview of reported issues by department and administrative level.
+- Time-based filtering (All, Today, Last 7 Days).
+- Location-based filtering (District, Sector, Cell).
+- Insights: resolution times, trends, and heatmap showing the issue density by district.
+- Sentiment analysis: sentiment by assigned level, average rating by department.
+- Predictive model.
 
 ## Requirements
 
