@@ -288,7 +288,8 @@ def create_district_map(filtered_df):
     issue_counts = filtered_df.groupby('district').size().reset_index(name='issue_count')
     merged = _gdf_districts.merge(issue_counts, left_on='shapeName', right_on='district', how='left')
     merged['issue_count'] = merged['issue_count'].fillna(0)
-    green_palette = ["#e8f8ec", "#7bed9f", "#2ecc71", "#27ae60", "#145214"]
+    green_palette = ["#e8f4fa", "#74c0fc", "#3498db", "#2471a3", "#0b3c5d"]
+
     fig = px.choropleth_map(
         merged,
         geojson=_rwanda_geojson_simpl,
@@ -304,7 +305,7 @@ def create_district_map(filtered_df):
     fig.update_layout(mapbox_style="carto-positron",
                       title="Density of Reported Issues by District in Kigali, Rwanda",
                       title_x=0.5,
-                      title_font=dict(size=20, family="Lato, sans-serif", color="#144d14"),
+                      title_font=dict(size=20, family="Lato, sans-serif", color="#000000"),
                       margin={"r": 0, "t": 50, "l": 0, "b": 0},
                       coloraxis_colorbar_title="Issue Count")
     return fig
