@@ -734,7 +734,7 @@ def render_page(current_page, selected_district, selected_sector, selected_cell,
 
 
 if __name__ == '__main__':
-    app.run(debug=True,port=8078)
+    app.run(debug=True, port=int(os.environ.get("PORT", 8078)))
    
     
     
