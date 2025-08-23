@@ -21,7 +21,7 @@ df['date_reported'] = pd.to_datetime(df.get('date_reported'), format='%d/%m/%Y',
 df['date_resolved'] = pd.to_datetime(df.get('date_resolved'), format='%d/%m/%Y', errors='coerce')
 
 # normalize text columns safely
-text_cols = ['status', 'is_overdue', 'assigned_level', 'assigned_department', 'district', 'sector', 'cell']
+text_cols = ['status', 'is_overdue', 'assigned_level', 'assigned_department', 'district', 'sector', 'cell', 'leaders', 'priority']
 for col in text_cols:
     if col in df.columns:
         df[col] = df[col].astype(str).str.strip()
@@ -310,6 +310,97 @@ def create_district_map(filtered_df):
                       coloraxis_colorbar_title="Issue Count")
     return fig
 
+# ---- NEW: leaders top/bottom + priority visuals (REVISED) ----
+def create_top_bottom_leaders(filtered_df):
+    """
+    Compute average feedback_rating per leader and return a horizontal bar
+    with top 5 and bottom 5 combined, ordered ASC by mean so it reads low->high.
+    """
+    if 'leaders' not in filtered_df.columns or filtered_df['leaders'].dropna().empty:
+        fig = go.Figure()
+        fig.update_layout(title="Leaders by Average Rating (no data)")
+        return fig
+
+    rated = filtered_df.dropna(subset=['feedback_rating', 'leaders']).copy()
+    if rated.empty:
+        fig = go.Figure()
+        fig.update_layout(title="Leaders by Average Rating (no ratings)")
+        return fig
+
+    leaders_avg = rated.groupby('leaders')['feedback_rating'].agg(['mean', 'count']).reset_index()
+    leaders_avg = leaders_avg.sort_values('mean', ascending=False)
+
+    top = leaders_avg.head(5)
+    bottom = leaders_avg.tail(5)
+
+    combined = pd.concat([top, bottom]).drop_duplicates(subset=['leaders'])
+    # Now order combined by mean ascending (so low to high)
+    combined = combined.sort_values('mean', ascending=True).reset_index(drop=True)
+    combined['group'] = combined['mean'].rank(method='first', ascending=False)  # dummy to keep group column if needed
+    # For color grouping use whether leader was in top originally
+    combined['which'] = combined['leaders'].apply(lambda x: 'Top' if x in set(top['leaders']) else 'Bottom')
+
+    order = list(combined['leaders'])
+    combined['leaders'] = pd.Categorical(combined['leaders'], categories=order, ordered=True)
+
+    # Reduced margins to avoid large empty white space and allow the chart to fill its container
+    fig = px.bar(combined, x='mean', y='leaders', orientation='h', color='which',
+                 labels={'mean': 'Avg Rating (1-5)', 'leaders': 'Leader'},
+                 text=combined['mean'].round(2),
+                 color_discrete_map={'Top': '#3498db', 'Bottom': '#d62728'})
+
+    # place text outside and increase margins to fit, but smaller than before so it fills space
+    fig.update_traces(textposition='outside', marker_line_width=0.5)
+    fig.update_layout(
+        title="Top & Bottom Leaders by Average Feedback Rating (low → high)",
+        xaxis_title="Average Rating",
+        yaxis_title="Leader",
+        xaxis=dict(range=[0, 5], automargin=True),
+        margin=dict(l=120, r=40, t=80, b=40),  # reduced left/right margins
+        legend=dict(title='', orientation='h', y=-0.12, x=0.5, xanchor='center'),
+        height=520
+    )
+
+    # Ensure annotations/text don't get clipped in certain browsers
+    fig.update_layout(autosize=True)
+    return fig
+
+def create_issues_by_priority(filtered_df):
+    """
+    Count issues by priority. Order: Urgent, High, Medium, Low
+    Changed to vertical bars with default colors and increased visibility.
+    """
+    if 'priority' not in filtered_df.columns:
+        fig = go.Figure()
+        fig.update_layout(title="Issues by Priority (not available)")
+        return fig
+
+    filtered_df['priority_norm'] = filtered_df['priority'].str.title().replace({'Urgent': 'Urgent', 'High': 'High', 'Medium': 'Medium', 'Low': 'Low'})
+    order = ['Urgent', 'High', 'Medium', 'Low']
+    counts = filtered_df['priority_norm'].value_counts().rename_axis('priority').reset_index(name='count')
+    if counts.empty:
+        fig = go.Figure()
+        fig.update_layout(title="Issues by Priority (no data)")
+        return fig
+
+    counts = counts.set_index('priority').reindex(order).fillna(0).reset_index()
+
+    # Vertical bar chart, default colors, bigger height and tighter margins
+    fig = px.bar(counts, x='priority', y='count', text='count',
+                 labels={'count': 'Number of Issues', 'priority': 'Priority'})
+    fig.update_traces(textposition='outside', marker_line_width=0.5)
+    fig.update_layout(
+        title="Issues by Priority",
+        xaxis_title="Priority",
+        yaxis_title="Number of Issues",
+        margin=dict(l=40, r=40, t=70, b=80),
+        height=520,
+        showlegend=False,
+        bargap=0.2
+    )
+    fig.update_layout(autosize=True)
+    return fig
+
 # ---- Dashboard view (use compact height so it fits presentation better) ----
 def dashboard_view(filtered_df: pd.DataFrame):
     status_clean = filtered_df['status'].str.lower()
@@ -578,6 +669,10 @@ def render_page(current_page, selected_district, selected_sector, selected_cell,
         bottom_fig.update_layout(autosize=True, margin=dict(l=30, r=30, t=50, b=30))
         map_fig.update_layout(autosize=True, margin=dict(l=0, r=0, t=50, b=0))
 
+        # --- New visuals (leaders + priority) placed below the trendline ---
+        leaders_fig = create_top_bottom_leaders(filtered_df)
+        priority_fig = create_issues_by_priority(filtered_df)
+
         insights_layout = html.Div([
             # top row: two charts each compact fixed height
             html.Div([
@@ -603,7 +698,22 @@ def render_page(current_page, selected_district, selected_sector, selected_cell,
             html.Div(
                 dcc.Graph(figure=bottom_fig, config={'displayModeBar': True, 'responsive': True}, style={'width': '100%', 'height': '360px'}),
                 style={'width': '100%', 'marginTop': '18px', 'boxSizing': 'border-box'}
-            )
+            ),
+
+            # --- NEW ROW: Leaders (left) & Priority (right) BELOW the trendline ---
+            html.Div([
+                html.Div(
+                    dcc.Graph(figure=leaders_fig, config={'displayModeBar': False, 'responsive': True},
+                              style={'width': '100%', 'height': '520px'}),
+                    style={'flex': '2 1 65%', 'minWidth': '420px', 'height': '520px', 'boxSizing': 'border-box', 'paddingRight': '8px'}
+                ),
+                html.Div(
+                    dcc.Graph(figure=priority_fig, config={'displayModeBar': False, 'responsive': True},
+                              style={'width': '100%', 'height': '520px'}),
+                    style={'flex': '1 1 35%', 'minWidth': '300px', 'height': '520px', 'boxSizing': 'border-box', 'paddingLeft': '8px'}
+                ),
+            ], style={'display': 'flex', 'flexDirection': 'row', 'gap': '12px', 'width': '100%', 'marginTop': '18px'}),
+
         ], style={'paddingTop': '6px', 'width': '100%', 'boxSizing': 'border-box', 'height': '100%', 'overflowY': 'auto'})
 
         return insights_layout, {'display': 'inline-block', 'marginBottom': '20px', 'alignSelf': 'flex-start', 'width': 'auto'}
