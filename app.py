@@ -11,6 +11,7 @@ from textblob import TextBlob
 from wordcloud import WordCloud
 import base64
 from io import BytesIO
+import os
 
 # ---------------- Load & prep data ----------------
 DATA_PATH = "C:/Users/gihoz/OneDrive/Desktop/CEPdash/final_dataset.csv"
@@ -66,7 +67,9 @@ except Exception as e:
 
 # ---------------- Dash app ----------------
 app = dash.Dash(__name__)
+server = app.server
 app.title = "CitizenConnect | Officials Dashboard"
+
 
 # remove default body margins and ensure 100% height for vh usage
 app.index_string = app.index_string.replace(
@@ -731,4 +734,7 @@ def render_page(current_page, selected_district, selected_sector, selected_cell,
 
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True,port=8078)
+   
+    
+    
