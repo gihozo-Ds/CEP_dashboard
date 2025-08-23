@@ -5,3 +5,5 @@ numpy
 geopandas
 textblob
 wordcloud
+gunicorn
+os
