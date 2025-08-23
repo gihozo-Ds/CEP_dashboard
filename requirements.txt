@@ -6,4 +6,3 @@ geopandas
 textblob
 wordcloud
 gunicorn
-os
