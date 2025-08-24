@@ -53,7 +53,7 @@ else:
     df['sentiment'] = ['neutral'] * len(df)
 
 # ---------------- Preload & simplify GeoJSON (districts) ----------------
-_GEOJSON_DISTRICT_PATH = "C:/Users/gihoz/OneDrive/Desktop/CEPdash/geoBoundaries-RWA-ADM2 (1).geojson"
+_GEOJSON_DISTRICT_PATH = "geoBoundaries-RWA-ADM2 (1).geojson"
 try:
     with open(_GEOJSON_DISTRICT_PATH, "r", encoding="utf-8") as f:
         _rwanda_geojson_raw = json.load(f)
