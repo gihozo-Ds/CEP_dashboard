@@ -14,7 +14,7 @@ from io import BytesIO
 import os
 
 # ---------------- Load & prep data ----------------
-DATA_PATH = "C:/Users/gihoz/OneDrive/Desktop/CEPdash/final_dataset.csv"
+DATA_PATH = "final_dataset.csv"
 df = pd.read_csv(DATA_PATH)
 
 # parse dates (DD/MM/YYYY) with coercion
