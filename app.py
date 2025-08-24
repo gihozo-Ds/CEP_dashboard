@@ -70,7 +70,6 @@ app = dash.Dash(__name__)
 server = app.server
 app.title = "CitizenConnect | Officials Dashboard"
 
-
 # remove default body margins and ensure 100% height for vh usage
 app.index_string = app.index_string.replace(
     "</head>",
@@ -109,11 +108,21 @@ def make_card(title: str, value, color: str):
 def create_sentiment_by_level(filtered_df):
     if filtered_df.empty or 'sentiment' not in filtered_df.columns:
         return go.Figure()
+
+    # compute totals per level to determine order (ascending)
+    totals = filtered_df.groupby('assigned_level').size().rename('total').reset_index()
+    level_order = list(totals.sort_values('total', ascending=True)['assigned_level'])
+
     sentiment_counts = (
         filtered_df.groupby(['assigned_level', 'sentiment'])
         .size()
         .reset_index(name='count')
     )
+
+    # apply ordering
+    sentiment_counts['assigned_level'] = pd.Categorical(sentiment_counts['assigned_level'], categories=level_order, ordered=True)
+    sentiment_counts = sentiment_counts.sort_values(['assigned_level', 'sentiment'])
+
     fig = px.bar(
         sentiment_counts,
         x="assigned_level",
@@ -133,7 +142,8 @@ def create_avg_rating_by_department(filtered_df):
         return fig
 
     dept_avg = rated_df.groupby("assigned_department")['feedback_rating'].mean().reset_index()
-    dept_avg = dept_avg.sort_values('assigned_department')
+    # sort ascending by average rating
+    dept_avg = dept_avg.sort_values('feedback_rating', ascending=True)
 
     fig = px.bar(dept_avg, x="assigned_department", y="feedback_rating", title="Average Feedback Rating by Department")
     fig.update_traces(marker_color="#3498db", opacity=0.95, hovertemplate="%{x}: %{y:.2f}<extra></extra>")
@@ -183,7 +193,11 @@ def create_dept_bar(filtered_df):
         fig = go.Figure()
         fig.update_layout(title="Issues by Department")
         return fig
-    fig = px.bar(dept_counts.sort_values('Number of Issues', ascending=True),
+
+    # sort ascending by number of issues
+    dept_counts = dept_counts.sort_values('Number of Issues', ascending=True)
+
+    fig = px.bar(dept_counts,
                  x='Number of Issues', y='Department', orientation='h', text='Number of Issues')
     fig.update_traces(textposition='outside')
     fig.update_layout(
@@ -196,7 +210,6 @@ def create_dept_bar(filtered_df):
     return fig
 
 def create_level_bar(filtered_df):
-    level_order = ['Cell', 'Sector', 'District']
     level_counts = (
         filtered_df['assigned_level']
         .replace('', np.nan)
@@ -205,15 +218,13 @@ def create_level_bar(filtered_df):
         .rename_axis('Assigned Level')
         .reset_index(name='count')
     )
-
     if level_counts.empty:
         fig = go.Figure()
         fig.update_layout(title="Issues by Assigned Level (no data)")
         return fig
 
-    level_counts = level_counts[level_counts['Assigned Level'].isin(level_order)]
-    level_counts['Assigned Level'] = pd.Categorical(level_counts['Assigned Level'], categories=level_order, ordered=True)
-    level_counts = level_counts.sort_values('Assigned Level')
+    # sort ascending by count
+    level_counts = level_counts.sort_values('count', ascending=True)
 
     fig = px.bar(level_counts, x='Assigned Level', y='count', title="Issues by Assigned Level")
     fig.update_traces(marker_color="#636EFA", opacity=0.95, hovertemplate="%{x}: %{y}<extra></extra>")
@@ -242,11 +253,10 @@ def create_level_bar(filtered_df):
     )
     return fig
 
-
 def create_resolution_donut(filtered_df):
     resolved_df = filtered_df[
         (filtered_df['status'].str.lower() == 'resolved') &
-        (filtered_df['date_reported'].notna()) &
+        (filtered_df['date_reported'].notna()) & 
         (filtered_df['date_resolved'].notna())
     ].copy()
     if resolved_df.empty:
@@ -254,7 +264,7 @@ def create_resolution_donut(filtered_df):
         fig.update_layout(title="Average Resolution Time by Department (no resolved cases)")
         return fig
     resolved_df['resolution_time'] = (resolved_df['date_resolved'] - resolved_df['date_reported']).dt.days.clip(lower=0)
-    department_avg = resolved_df.groupby('assigned_department')['resolution_time'].mean().sort_values(ascending=False)
+    department_avg = resolved_df.groupby('assigned_department')['resolution_time'].mean().sort_values(ascending=True)
     department_avg.index = department_avg.index.str.replace(' and ', ' & ').str.title()
     labels = [f"{dept}<br>{avg:.1f} days" for dept, avg in zip(department_avg.index, department_avg.values)]
     fig = px.pie(names=labels, values=department_avg.values, hole=0.5, title='Average Resolution Time by Department')
@@ -276,6 +286,8 @@ def create_issues_over_time(filtered_df):
         fig = go.Figure()
         fig.update_layout(title="Issues Over Time (no data)")
         return fig
+    # ensure sorted by date ascending
+    time_series = time_series.sort_values('date_reported', ascending=True)
     time_series['Smoothed'] = time_series['Issue Count'].rolling(window=7, min_periods=1).mean()
     fig = px.line(time_series, x='date_reported', y='Smoothed', title="Issues Reported Over Time")
     fig.update_traces(line=dict(width=2))
@@ -339,39 +351,33 @@ def create_top_bottom_leaders(filtered_df):
     combined = pd.concat([top, bottom]).drop_duplicates(subset=['leaders'])
     # Now order combined by mean ascending (so low to high)
     combined = combined.sort_values('mean', ascending=True).reset_index(drop=True)
-    combined['group'] = combined['mean'].rank(method='first', ascending=False)  # dummy to keep group column if needed
-    # For color grouping use whether leader was in top originally
     combined['which'] = combined['leaders'].apply(lambda x: 'Top' if x in set(top['leaders']) else 'Bottom')
 
     order = list(combined['leaders'])
     combined['leaders'] = pd.Categorical(combined['leaders'], categories=order, ordered=True)
 
-    # Reduced margins to avoid large empty white space and allow the chart to fill its container
     fig = px.bar(combined, x='mean', y='leaders', orientation='h', color='which',
                  labels={'mean': 'Avg Rating (1-5)', 'leaders': 'Leader'},
                  text=combined['mean'].round(2),
-                 color_discrete_map={'Top': '#3498db', 'Bottom': '#d62728'})
+                 color_discrete_map={'Top': '#3498db', 'Bottom': '#2ecc71'})
 
-    # place text outside and increase margins to fit, but smaller than before so it fills space
+    # place text outside and increase margins to fit
     fig.update_traces(textposition='outside', marker_line_width=0.5)
     fig.update_layout(
         title="Top & Bottom Leaders by Average Feedback Rating (low → high)",
         xaxis_title="Average Rating",
         yaxis_title="Leader",
         xaxis=dict(range=[0, 5], automargin=True),
-        margin=dict(l=120, r=40, t=80, b=40),  # reduced left/right margins
+        margin=dict(l=160, r=60, t=80, b=40),
         legend=dict(title='', orientation='h', y=-0.12, x=0.5, xanchor='center'),
         height=520
     )
-
-    # Ensure annotations/text don't get clipped in certain browsers
     fig.update_layout(autosize=True)
     return fig
 
 def create_issues_by_priority(filtered_df):
     """
-    Count issues by priority. Order: Urgent, High, Medium, Low
-    Changed to vertical bars with default colors and increased visibility.
+    Count issues by priority. Presented ordered ascending by count.
     """
     if 'priority' not in filtered_df.columns:
         fig = go.Figure()
@@ -379,21 +385,20 @@ def create_issues_by_priority(filtered_df):
         return fig
 
     filtered_df['priority_norm'] = filtered_df['priority'].str.title().replace({'Urgent': 'Urgent', 'High': 'High', 'Medium': 'Medium', 'Low': 'Low'})
-    order = ['Urgent', 'High', 'Medium', 'Low']
     counts = filtered_df['priority_norm'].value_counts().rename_axis('priority').reset_index(name='count')
     if counts.empty:
         fig = go.Figure()
         fig.update_layout(title="Issues by Priority (no data)")
         return fig
 
-    counts = counts.set_index('priority').reindex(order).fillna(0).reset_index()
+    # Sort ascending by count
+    counts = counts.sort_values('count', ascending=True)
 
-    # Vertical bar chart, default colors, bigger height and tighter margins
     fig = px.bar(counts, x='priority', y='count', text='count',
                  labels={'count': 'Number of Issues', 'priority': 'Priority'})
     fig.update_traces(textposition='outside', marker_line_width=0.5)
     fig.update_layout(
-        title="Issues by Priority",
+        title="Issues by Priority (ascending)",
         xaxis_title="Priority",
         yaxis_title="Number of Issues",
         margin=dict(l=40, r=40, t=70, b=80),
@@ -509,7 +514,7 @@ app.layout = html.Div([
             html.Hr(style={'borderColor': 'rgba(255,255,255,0.15)'}),
             html.Button('More Insights', id='insights-button', n_clicks=0, style={'width': '100%', 'marginBottom': '10px'}),
             html.Button('Sentiments', id='sentiments-button', n_clicks=0, style={'width': '100%', 'marginBottom': '10px'}),
-            html.Button('Model', id='model-button', n_clicks=0, style={'width': '100%'}),
+            # removed Model button per request
         ],
         style={
             'position': 'fixed',
@@ -581,10 +586,9 @@ def update_cell_options(selected_sector):
     Output('current-page', 'data'),
     Input('insights-button', 'n_clicks'),
     Input('sentiments-button', 'n_clicks'),
-    Input('model-button', 'n_clicks'),
     Input('go-back-button', 'n_clicks'),
 )
-def update_current_page(insights_n, sentiments_n, model_n, back_n):
+def update_current_page(insights_n, sentiments_n, back_n):
     ctx = callback_context
     if not ctx.triggered:
         return dash.no_update
@@ -593,8 +597,6 @@ def update_current_page(insights_n, sentiments_n, model_n, back_n):
         return 'insights'
     if trigger == 'sentiments-button':
         return 'sentiments'
-    if trigger == 'model-button':
-        return 'model'
     if trigger == 'go-back-button':
         return 'dashboard'
     return dash.no_update
@@ -721,20 +723,8 @@ def render_page(current_page, selected_district, selected_sector, selected_cell,
 
         return insights_layout, {'display': 'inline-block', 'marginBottom': '20px', 'alignSelf': 'flex-start', 'width': 'auto'}
 
-    # ----------------- MODEL PAGE -----------------
-    if current_page == 'model':
-        model_layout = html.Div([
-            html.H2("🤖 Predictive Model", style={'color': '#2c3e50'}),
-            html.P("Display model predictions, accuracy, or risk flags here.")
-        ])
-        return model_layout, {'display': 'inline-block', 'marginBottom': '20px', 'alignSelf': 'flex-start', 'width': 'auto'}
-
     # default: dashboard
     return dashboard_view(filtered_df), {'display': 'none', 'alignSelf': 'flex-start', 'width': 'auto'}
 
-
 if __name__ == '__main__':
     app.run(debug=True, port=int(os.environ.get("PORT", 8078)))
-   
-    
-    
