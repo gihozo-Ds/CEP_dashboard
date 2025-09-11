@@ -22,6 +22,9 @@ pip install -r requirements.txt
 ```
 
 ## Usage
+
+You can try the live dashboard here:https://cep-dashboard-3.onrender.com
+
 1. Run the app:
     ```bash
     python app.py
